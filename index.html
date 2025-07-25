@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Heath's FPS Royale</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #87ceeb; }
+    canvas { display: block; }
+    #instructions {
+      position: absolute;
+      top: 50%;
+      width: 100%;
+      text-align: center;
+      color: white;
+      font-family: Arial, sans-serif;
+      font-size: 24px;
+      user-select: none;
+      cursor: pointer;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="instructions">
+    Click to play. WASD to move. Mouse to look. Click to shoot targets.
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/PointerLockControls.js"></script>
+
+  <script>
+    // BASIC SETUP
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // LIGHTS
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(10, 100, 10);
+    scene.add(light);
+
+    const ambientLight = new THREE.AmbientLight(0x888888);
+    scene.add(ambientLight);
+
+    // FLOOR
+    const floorGeometry = new THREE.PlaneGeometry(500, 500);
+    const floorMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // BUILDINGS (walls)
+    const buildings = [];
+    function createBuilding(x, y, z, w, h, d, color=0x444444) {
+      const geometry = new THREE.BoxGeometry(w, h, d);
+      const material = new THREE.MeshPhongMaterial({ color });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, z);
+      scene.add(mesh);
+      buildings.push(mesh);
+    }
+
+    // Add some buildings
+    createBuilding(20, 5, -50, 20, 10, 20);  // front-left
+    createBuilding(-30, 5, -100, 40, 15, 20); // center-left
+    createBuilding(50, 8, -120, 30, 20, 30); // right
+
+    // POINTER LOCK CONTROLS (FPS camera)
+    const controls = new THREE.PointerLockControls(camera, document.body);
+
+    const instructions = document.getElementById('instructions');
+    instructions.addEventListener('click', () => {
+      controls.lock();
+    });
+
+    controls.addEventListener('lock', () => {
+      instructions.style.display = 'none';
+    });
+    controls.addEventListener('unlock', () => {
+      instructions.style.display = '';
+    });
+
+    // PLAYER VARIABLES
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    let moveForward = false;
+    let moveBackward = false;
+    let moveLeft = false;
+    let moveRight = false;
+
+    // MOVEMENT KEYS
+    document.addEventListener('keydown', (e) => {
+      switch(e.code) {
+        case 'KeyW': moveForward = true; break;
+        case 'KeyS': moveBackward = true; break;
+        case 'KeyA': moveLeft = true; break;
+        case 'KeyD': moveRight = true; break;
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      switch(e.code) {
+        case 'KeyW': moveForward = false; break;
+        case 'KeyS': moveBackward = false; break;
+        case 'KeyA': moveLeft = false; break;
+        case 'KeyD': moveRight = false; break;
+      }
+    });
+
+    // PLAYER START POSITION
+    camera.position.set(0, 5, 0);
+
+    // GUN (simple box)
+    const gunGeometry = new THREE.BoxGeometry(0.3, 0.2, 1);
+    const gunMaterial = new THREE.MeshBasicMaterial({ color: 0x222222 });
+    const gun = new THREE.Mesh(gunGeometry, gunMaterial);
+    gun.position.set(0.5, -0.5, -1);
+    camera.add(gun);
+    scene.add(camera);
+
+    // BULLETS
+    const bullets = [];
+    const bulletSpeed = 50;
+    const bulletGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+    const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+    function shootBullet() {
+      const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+
+      // Start at gun tip (camera position + gun forward)
+      const gunTip = new THREE.Vector3(0, 0, -1);
+      gunTip.applyMatrix4(camera.matrixWorld);
+
+      bullet.position.copy(gunTip);
+
+      // Direction camera is looking
+      const direction = new THREE.Vector3();
+      camera.getWorldDirection(direction);
+
+      bullet.userData = {
+        velocity: direction.multiplyScalar(bulletSpeed)
+      };
+
+      scene.add(bullet);
+      bullets.push(bullet);
+    }
+
+    // Shoot on click
+    window.addEventListener('click', () => {
+      if (controls.isLocked) shootBullet();
+    });
+
+    // TARGETS
+    const targets = [];
+    function createTarget(x, y, z) {
+      const geometry = new THREE.BoxGeometry(2, 2, 2);
+      const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(x, y, z);
+      scene.add(mesh);
+      targets.push(mesh);
+    }
+
+    // Spawn targets around the map
+    createTarget(10, 1, -30);
+    createTarget(-15, 1, -60);
+    createTarget(25, 1, -90);
+    createTarget(-40, 1, -110);
+
+    // COLLISION CHECK FUNCTION
+    function checkCollision(obj1, obj2) {
+      const box1 = new THREE.Box3().setFromObject(obj1);
+      const box2 = new THREE.Box3().setFromObject(obj2);
+      return box1.intersectsBox(box2);
+    }
+
+    // ANIMATION LOOP
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (controls.isLocked) {
+        const delta = clock.getDelta();
+        const speed = 10;
+
+        // Movement damping
+        velocity.x -= velocity.x * 10.0 * delta;
+        velocity.z -= velocity.z * 10.0 * delta;
+
+        direction.z = Number(moveForward) - Number(moveBackward);
+        direction.x = Number(moveRight) - Number(moveLeft);
+        direction.normalize();
+
+        if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
+        if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
+
+        controls.moveRight(-velocity.x * delta);
+        controls.moveForward(-velocity.z * delta);
+      }
+
+      // Update bullets position
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.position.addScaledVector(b.userData.velocity, clock.getDelta());
+
+        // Remove bullet if too far
+        if (b.position.distanceTo(camera.position) > 200) {
+          scene.remove(b);
+          bullets.splice(i, 1);
+          continue;
+        }
+
+        // Check bullet collision with targets
+        for (let j = targets.length -1; j >= 0; j--) {
+          if (checkCollision(b, targets[j])) {
+            // Remove target & bullet
+            scene.remove(targets[j]);
+            targets.splice(j,1);
+            scene.remove(b);
+            bullets.splice(i,1);
+            break;
+          }
+        }
+
+        // Check bullet collision with buildings
+        for (const bld of buildings) {
+          if (checkCollision(b, bld)) {
+            scene.remove(b);
+            bullets.splice(i, 1);
+            break;
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // WINDOW RESIZE HANDLER
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
